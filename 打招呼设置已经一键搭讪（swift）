@@ -1,0 +1,1306 @@
+项目描述：用户通过打招呼设置录制打招呼语音，添加打招呼文字，首页feed页面展示sayhi的小动画，点开可查看将要搭讪的列表，选择想要搭讪的用户以及搭讪的文字和语音，也可随机选择文案、语音，未通过审核的语音和文字不可选择，若没有设置过搭讪的语音和文案，则跳转到打招呼设置页面， 一键搭讪结束后，可在私信中看到对于的语音和文字，首次点开用户的私信页面，可以选择打招呼，直接发送，用户和陌生社交的破冰。
+项目难点：首页活动位需要再每次进去页面时进行刷新，显示3个随机的头像，与点击开的可选择的用户不同，且需要经常更新，且动画每次都需要播放
+解决方案：每次进入页面时，拉接口，防止多次拉接口，要求前后时间差起码5秒，3个随机头像和里面和选择的用户，服务端分别用两个不同的数组返回，每个数组使用不同的model
+
+
+import Foundation
+import UIKit
+import Reusable
+import FalconUIKit
+import ACCommonUI
+
+/// 这个类存在的意义在于封装了，导航栏和内容和底部栏，还有分页的逻辑，将分页的容器放到了内容的部分，标题栏在子类中设置
+/// 所需的泛型有四个，1.E: 数据 , 2.分类的标题，3.分页的容器，4.将标题和分页内容关联起来的合成器
+open class GreetingContainerPageWidget<E, TitleBar: PageSelectable, PageContent: PageSelectable, CompositorType>: FalconUIKit.RootContainerWidget where TitleBar: Widget, PageContent: Widget, CompositorType: GenericPageCompositor<E, TitleBar, PageContent>{
+    
+    /// 用来封装TitleBar和PageContainer之间的交互
+    public var pageCompositor: CompositorType
+    
+    public init(viewController: UIViewController? = nil, pageCompositor: CompositorType) {
+        self.pageCompositor = pageCompositor
+        super.init(viewController: viewController)
+    }
+    
+    lazy var defaultNavigationBar : DefaultNavigationBar = {
+        var titlebar = DefaultNavigationBar()
+       
+        titlebar.rightButton.isHidden = true
+       
+        titlebar.title = "打招呼语"
+        return titlebar
+    }()
+    
+    var greetContainerView = GreetingContainerPageView()
+    
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        greetContainerView.tilePageContentView = pageCompositor.titleBar.view
+        
+        greetContainerView.pageContentView = pageCompositor.pageContainer.view
+
+        container.contentView = greetContainerView
+        container.navigationBar.contentView = defaultNavigationBar
+        container.tabBar.isHidden = true
+    }
+}
+
+import Foundation
+import FalconUIKit
+import UIKit
+import IMUI
+
+/// 打招呼的分页容器
+open class GreetingPageContainer: GenericPageWidget<GreetingPageModel> {
+    public init() {
+        super.init(elements: [], controller: nil, scrollDirection: .horizontal)
+    }
+    
+    open override func createWidget(_ collectionView: UICollectionView, at indexPath: IndexPath, for element: GreetingPageModel) -> Widget {
+        
+        switch element.type {
+        case .recording:
+            return HelloRecordingWidget()
+        default:
+            return GreetingWordsWidget()
+        }
+        
+    }
+}
+
+import Foundation
+import FalconUIKit
+import ACCommonUI
+import IMUI
+
+
+/// 完整的首页的实现类
+open class GreetingPageWidget: GreetingContainerPageWidget<GreetingPageModel, GreetingTitleBar, GreetingPageContainer, GreetingPageCompositor> {
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        //设置页面数据
+        pageCompositor.elements = [.init(type: .recording, title: "打招呼录音"),.init(type: .words, title: "打招呼语")]
+        
+        //选中第一页
+        pageCompositor.selectPage(for: pageCompositor.elements.first!)
+        
+    }
+}
+
+/// 合成 IndexTitleBarWidget和 IndexPageContainer
+public typealias GreetingPageCompositor = GenericPageCompositor<GreetingPageModel, GreetingTitleBar, GreetingPageContainer>
+
+import Foundation
+import FalconUIKit
+import UIKit
+
+public protocol GreetingTitleElement {
+    /// 标题
+    var title: String { get }
+}
+
+/// 打招呼录音和打招呼语的标题
+open class GreetingTabPageTitlesWidget<Element>: GenericOneSectionOneCellCollectionViewWidget<Element, SayHiTitleBarItemViewCell> where Element: GreetingTitleElement {
+    public init() {
+        super.init(elements: [], controller: nil, scrollDirection: .horizontal)
+        
+        //这个设置一下，在contentSize变化后，再选中对应的Cell
+        enableDelaySelectWhenContentSizeChanged = true
+        //设置为不可滑动
+        scrollView.isScrollEnabled = false
+    }
+    
+    open override func config(_ collectionView: UICollectionView, indexPath: IndexPath, cell: SayHiTitleBarItemViewCell, element: Element) {
+        collectionView.showsHorizontalScrollIndicator = false
+        cell.cellView.titleLabel.text = element.title
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return .init(width: (collectionView.frame.width - 2*2) / 2, height: 40)
+    }
+}
+
+import Foundation
+import FalconUIKit
+import UIKit
+import ACCommonUI
+import IMUI
+
+/// 消息页的分页标题
+open class GreetingTitleBar: GreetingTabPageTitlesWidget<GreetingPageModel> {
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
+        .init(top: 0, left: 2, bottom: 0, right: 2)
+    }
+}
+
+import Foundation
+import FalconUIKit
+
+/// 消息页面的容器
+open class GreetingPageVC: GenericWidgetViewController<GreetingPageWidget> {
+    public init() {
+        super.init(widget: .init(pageCompositor: .init(titleBar: .init(), pageContainer: .init())))
+
+        title = "打招呼"
+    }
+    
+    public required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+}
+
+import Foundation
+import FalconUIKit
+
+class GreetingVC:GenericWidgetViewController<HelloRecordingWidget> {
+    init() {
+        super.init(widget: .init())
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+import Foundation
+import FalconUIKit
+
+class HelloRecordingVC:GenericWidgetViewController<HelloRecordingWidget> {
+    init() {
+        super.init(widget: .init())
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+import ACCommonUI
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import ACClient
+import FalconFoundation
+
+class FeedSayhiAlertViewWidget: BaseWidget {
+    
+    var sayhiAlertView = FeedSayhiAlertView(frame: UIScreen.main.bounds)
+    
+    open var sayhiCellWidget = FeedSayhiCellWidget()
+    
+    open var sayHiWordsSelectCellWidget = SayHiWordsSelectCellWidget()
+    open var sayHiVoiceSelectCellWidget = SayHiVoiceSelectCellWidget()
+
+    var randomType : Random {
+        if sayHiWordsSelectCellWidget.greetWords.id == 0 && sayHiVoiceSelectCellWidget.greetVoice.id == 0 && sayHiVoiceSelectCellWidget.greetVoice.duration == 0{
+            return .Random_VOICE_TEXT
+        }
+        
+        if sayHiVoiceSelectCellWidget.greetVoice.id == 0 {
+            return .Random_VOICE
+        }
+        
+        if sayHiWordsSelectCellWidget.greetWords.id == 0 {
+            return .Random_TEXT
+        }
+       
+        return .Random_NONE
+    }
+    
+    lazy var textId: Int = {
+        self.sayHiWordsSelectCellWidget.greetWords.id ?? 0
+    }()
+    
+    lazy var voiceId :Int = {
+        self.sayHiVoiceSelectCellWidget.greetVoice.id ?? 0
+    }()
+       
+    override func loadView() {
+        view = sayhiAlertView
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        sayhiAlertView.bgContainerView .addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(onClickBlankView(_:))))
+        sayhiAlertView.sayhiImageView .addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(onClickSelectAlertBlankView(_:))))
+        backgroundView .addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(onClickSelectAlertBlankView(_:))))
+        sayhiAlertView.sayHiButton .addTarget(self, action: #selector(onClickAllSayHiButton(_:)), for: .touchUpInside)
+        sayhiAlertView.sayhiWordsButton .addTarget(self, action: #selector(onClickSayhiWordsButton(_:)), for: .touchUpInside)
+        sayhiAlertView.sayhiRecordngButton .addTarget(self, action: #selector(onClickSayhiRecordingsButton(_:)), for: .touchUpInside)
+        
+        sayhiAlertView.sayhiContentContainerView .addSubview(sayhiCellWidget.view)
+        sayhiCellWidget.view.fc.edge(equalTo:  sayhiAlertView.sayhiContentContainerView)
+        
+        //获取搭讪文案和录音 需要根据是否有数据显示UI
+        getGreetWords()
+        getGreetRecording()
+        setupNotifications()
+        setupCallBack()
+        self.setupSahhiButtonStatus()
+    }
+    
+    //首页弹窗 弹窗录音列表和打招呼列表
+    open func showSayHiWordsSelectView() {
+        sayHiWordsSelectAlertView.containerView .addSubview(sayHiWordsSelectCellWidget.view)
+        sayHiWordsSelectCellWidget.view.fc.edge(equalTo: sayHiWordsSelectAlertView.containerView)
+    }
+    
+    open func showSayHiVoiceSelectView() {
+        sayHiRecordingSelectAlertView.containerView .addSubview(sayHiVoiceSelectCellWidget.view)
+        sayHiVoiceSelectCellWidget.view.fc.edge(equalTo: sayHiRecordingSelectAlertView.containerView)
+    }
+    
+    //选择过打招呼文字
+    var isSelectSayhiWords :Bool?
+    //选择过打招呼语音
+    var isSelectSayhiVoice :Bool?
+    
+    func setupCallBack(){
+        sayHiWordsSelectCellWidget .setCallback {
+            self.isSelectSayhiWords = true
+            self.sayHiWordsSelectAlertView .removeFromSuperview()
+            self.sayhiAlertView.sayhiWordsLabel.text = self.sayHiWordsSelectCellWidget.greetWords.data
+            self.setupSahhiButtonStatus()
+        }
+        
+        sayHiVoiceSelectCellWidget .setCallback {
+            self.isSelectSayhiVoice = true
+            self.sayHiRecordingSelectAlertView .removeFromSuperview()
+            self.sayhiAlertView.sayhiVoiceLabel.text = self.sayHiVoiceSelectCellWidget.greetVoice.name
+            self.setupSahhiButtonStatus()
+        }
+        
+        sayhiCellWidget.setCallback {
+            self.setupSahhiButtonStatus()
+        }
+    }
+    
+    func setupSahhiButtonStatus() {
+        sayhiAlertView.sayHiButton.isEnabled = sayhiButtonEnable
+        updataSayhiButotnUI()
+    }
+
+    func updataSayhiButotnUI() {
+        sayhiAlertView.sayHiButton.colors = sayhiButtonEnable ?  [UIColor(named: .sayhiButtonLeft), UIColor(named: .sayhiButtonRight)] :  [UIColor(named: .sayhiButtonDisable)]
+    }
+    
+    open var sayHiWordsSelectAlertView = SayHiWordsSelectAlertView()
+    open var sayHiRecordingSelectAlertView = SayHiWordsSelectAlertView()
+    
+    var backgroundView = UIView(frame: UIScreen.main.bounds)
+    
+    let disposePackage = DisposePackage()
+    
+    func setupNotifications() {
+        
+        NotificationCenter.default.fc.addObserver(forName: UserManager.userSayhiUpdate) { _ in
+            self.getGreetRecording()
+            self.setupNotifications()
+        }.dispose(by: disposePackage)
+    }
+    
+    @objc func onClickSayhiWordsButton(_ sender: Any) {
+        getGreetWords()
+        
+        if greetWordIsEmpty == true {
+            self.view .removeFromSuperview()
+            UIViewController.fc.rootNavigationController?.pushViewController(GreetingPageVC(), animated: true)
+            return
+        }
+        
+        if (sayHiRecordingSelectAlertView.superview != nil) {
+            sayHiRecordingSelectAlertView .removeFromSuperview()
+        }
+        
+        ///背景view
+        sayhiAlertView.addSubview(backgroundView)
+        
+        sayhiAlertView.addSubview(sayHiWordsSelectAlertView)
+        sayHiWordsSelectAlertView.snp.makeConstraints { make in
+            make.width.equalTo(250)
+            make.height.equalTo(219)
+            make.bottom.equalTo(sayhiAlertView.sayhiWordsView.snp.top)
+            make.centerX.equalTo(sayhiAlertView)
+        }
+        
+        showSayHiWordsSelectView()
+        sayHiWordsSelectCellWidget.submitGreetResp = greetWordsResp
+    }
+    
+    @objc func onClickSayhiRecordingsButton(_ sender: Any) {
+        getGreetRecording()
+        
+        if greetVoiceIsEmpty == true {
+            self.view .removeFromSuperview()
+            UIViewController.fc.rootNavigationController?.pushViewController(GreetingPageVC(), animated: true)
+            return
+        }
+        
+        if (sayHiWordsSelectAlertView.superview != nil) {
+            sayHiWordsSelectAlertView .removeFromSuperview()
+        }
+        
+        ///背景view
+        sayhiAlertView.addSubview(backgroundView)
+        sayhiAlertView.addSubview(sayHiRecordingSelectAlertView)
+        sayHiRecordingSelectAlertView.snp.makeConstraints { make in
+            make.width.equalTo(250)
+            make.height.equalTo(219)
+            make.bottom.equalTo(sayhiAlertView.sayhiRecoordingView.snp.top)
+            make.centerX.equalTo(sayhiAlertView)
+        }
+        
+        showSayHiVoiceSelectView()
+        sayHiVoiceSelectCellWidget.submitGreetResp = greetVoicResp
+    }
+    
+    @objc func onClickSelectAlertBlankView(_ sender: UITapGestureRecognizer) {
+        if (sayHiRecordingSelectAlertView.superview != nil) {
+            sayHiRecordingSelectAlertView .removeFromSuperview()
+        }
+        
+        if (sayHiWordsSelectAlertView.superview != nil) {
+            sayHiWordsSelectAlertView .removeFromSuperview()
+        }
+        
+        if (backgroundView.superview != nil) {
+            backgroundView .removeFromSuperview()
+        }
+    }
+    
+    // 返回的打招呼文案数据
+    var greetWordsResp: SubmitGreetResp?{
+        didSet{
+            if greetWordIsEmpty == true {
+                self.sayhiAlertView.sayhiWordsLabel.text = "去录制打招呼文案"
+            }else{
+                self.sayhiAlertView.sayhiWordsLabel.text = "选择打招呼文案"
+            }
+        }
+    }
+    
+    //打招呼文案数据是否为空
+    var greetWordIsEmpty : Bool{
+        greetWordsResp?.infos?.count ?? 0 == 0
+    }
+    
+    // 返回的打招呼录音数据
+    var greetVoicResp: SubmitGreetResp?{
+        didSet{
+            if greetVoiceIsEmpty == true {
+                self.sayhiAlertView.sayhiVoiceLabel.text = "去录制打招呼语"
+            }else{
+                self.sayhiAlertView.sayhiVoiceLabel.text = "选择打招呼语音"
+            }
+        }
+    }
+    
+    //打招呼录音数据是否为空
+    var greetVoiceIsEmpty : Bool{
+        greetVoicResp?.infos?.count ?? 0 == 0
+    }
+    
+    //有选择搭讪的用户 且 选择过文字和语音
+    var sayhiButtonEnable: Bool{
+        self.sayhiCellWidget.uidList.count > 0 && true == self.isSelectSayhiWords && true == self.isSelectSayhiVoice
+    }
+    
+    
+    func getGreetWords() {
+        let req = CheckGreetReq(type: .Greet_TEXT)
+    
+        UserManager.shared .checkGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.greetWordsResp = response.value?.data
+        }
+    }
+    
+    public func getGreetRecording() {
+        let req = CheckGreetReq(type: .Greet_VOICE)
+    
+        UserManager.shared .checkGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.greetVoicResp = response.value?.data
+        }
+    }
+    
+    @objc func onClickBlankView(_ sender: UITapGestureRecognizer) {
+        dissMissAlertView()
+    }
+    
+    @objc func onClickAllSayHiButton(_ sender: UIButton) {
+        let uidList = self.sayhiCellWidget.uidList
+        if uidList.isEmpty {
+            return
+        }
+        
+        let sayHiReq = SayHiReq(random: randomType,
+                                textId: textId,
+                                voiceId: voiceId,
+                                uids: uidList)
+        
+        //打点
+        let send_uid = uidList.reduce("") { partialResult, obj in
+            //如果是空字符串，则不拼,
+            if partialResult.isEmpty {
+                return String(obj)
+            }
+            return partialResult + "," + String(obj)
+        }
+        dataTracker.event(.chat_user_click, params: ["send_uid":send_uid, "send_number ": uidList.count])
+        
+        UserManager.shared .sayHiRequest(sayHiReq) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            ToastView .show("发送成功")
+            NotificationCenter.default.post(name: UserManager.sayhiListUpdate, object: self)
+        }
+    }
+    
+    func dissMissAlertView(){
+        sayhiAlertView .removeFromSuperview()
+    }
+
+}
+
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import PassportUI
+import ACClient
+
+///一键搭讪弹窗的列表
+open class FeedSayhiCellWidget:GenericOneSectionOneCellCollectionViewWidget<SayHiUserInfo, FeedSayhiItemViewCell> {
+    init() {
+        super.init(elements: [], controller: nil, collectionView: BaseCollectionView(scrollDirection: .vertical))
+    }
+    
+    var sayHiListResp : SayHiListResp?{
+        didSet{
+            self.elements = sayHiListResp?.list ?? []
+            
+            guard let list = sayHiListResp?.list else {
+                return
+            }
+            for i in 0..<list.count {
+                self.collectionView.fc.selectItem(at:i)
+            }
+        }
+    }
+    
+    public typealias Callback = () -> Void
+    
+    public var callback: Callback?
+    
+    public func setCallback(_ callback: Callback? = nil) {
+        self.callback = callback
+    }
+    
+    public var sayhiList : [SayHiUserInfo]{
+        collectionView.indexPathsForSelectedItems?.map({ indexPath in
+                   return self.element(at: indexPath)
+        }) ?? []
+    }
+    
+    public var list = [Int]()
+    /// uid数组
+    public var uidList : [Int]{
+        list .removeAll()
+        for sayhiInfo in self.sayhiList {
+            list.append(sayhiInfo.uid)
+        }
+        return list
+    }
+    
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        collectionView.register(cellType: FeedSayhiItemViewCell.self)
+        collectionView.allowsMultipleSelection = true
+    }
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        
+        return .init(width: (collectionView.frame.width - 4 * 2) / 3, height: 90)
+    }
+    open override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath, for element: SayHiUserInfo) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(for: indexPath, cellType: FeedSayhiItemViewCell.self)
+        cell.cellView.avaterView .setImage(with: element.avatar)
+        cell.cellView.nickNameLabel.text = element.nickname
+        return cell
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
+        return 1
+    }
+
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
+        return 1
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, shouldDeselectItemAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        super.collectionView(collectionView, didSelectItemAt: indexPath)
+        callback?()
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
+        super.collectionView(collectionView, didDeselectItemAt: indexPath)
+        callback?()
+    }
+    
+    open override func onContentSizeChanged(_ oldValue: CGSize, newValue: CGSize) {
+        super.onContentSizeChanged(oldValue, newValue: newValue)
+        self.view.invalidateIntrinsicContentSize()
+    }
+}
+
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import PassportUI
+import ACClient
+
+///首页浮窗头像的列表
+open class FeedSayhiFloatAvaterCellWidget:GenericOneSectionOneCellCollectionViewWidget<String, FeedSayhiFloatAvaterViewCell> {
+    init() {
+        super.init(elements: [], controller: nil, collectionView: BaseCollectionView(scrollDirection: .horizontal))
+    }
+    
+    var sayHiListResp : SayHiListResp?{
+        didSet{
+            self.elements = sayHiListResp?.randomAvatarList ?? []
+        }
+    }
+    
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        collectionView.register(cellType: FeedSayhiFloatAvaterViewCell.self)
+    }
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return .init(width: 26, height: 26)
+    }
+    open override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath, for element: String) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(for: indexPath, cellType: FeedSayhiFloatAvaterViewCell.self)
+        cell.cellView.avaterView .setImage(with: element)
+        return cell
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
+        return -10
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, shouldDeselectItemAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return min(3, elements.count)
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        super.collectionView(collectionView, didSelectItemAt: indexPath)
+    }
+    
+}
+
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import PassportUI
+import ACCommonUI
+import FalconFoundation
+import ACClient
+
+////打招呼设置 文字 列表
+class GreetingWordsCellWidget:GenericOneSectionOneCellCollectionViewWidget<GreetInfo, GreetingWordsItemViewCell> {
+    
+    init() {
+        super.init(elements: [], controller: nil, collectionView: BaseCollectionView(scrollDirection: .vertical))
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        collectionView.register(cellType: GreetingWordsItemViewCell.self)
+        
+        getGreetWords()
+    }
+    
+    public func getGreetWords() {
+        let req = CheckGreetReq(type: .Greet_TEXT)
+    
+        UserManager.shared .checkGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.elements = response.value?.data?.infos ?? []
+        }
+    }
+    
+    override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return .init(width:collectionView.frame.width, height: 52)
+    }
+    override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath, for element: GreetInfo) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(for: indexPath, cellType: GreetingWordsItemViewCell.self)
+        cell.cellView.wordsLabel.text = element.data
+        cell.cellView.closeButton.fc.setUserInfo(object: element)
+        cell.cellView.verfiyLabel.isHidden = element.state == .AuditPass
+        cell.cellView.closeButton .addTarget(self, action: #selector(onClickDeleteButton(_:)), for: .touchUpInside)
+        return cell
+    }
+    
+    @objc func onClickDeleteButton(_ sender: UIButton) {
+        guard let element = sender.fc.getUserInfo(of: GreetInfo.self) else {
+            return
+        }
+        
+        let req = DelGreetReq(type: .Greet_TEXT, id: element.id)
+        
+        UserManager.shared .delGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.elements = response.value?.data?.infos ?? []
+            NotificationCenter.default.post(name: UserManager.userSayhiUpdate, object: self)
+        }
+    }
+    
+    override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
+        return 7
+    }
+    
+    override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        
+        let element = element(at: indexPath)
+        
+        }
+        
+    override func onContentSizeChanged(_ oldValue: CGSize, newValue: CGSize) {
+        super.onContentSizeChanged(oldValue, newValue: newValue)
+        self.view.invalidateIntrinsicContentSize()
+    }
+}
+
+import ACCommonUI
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import ACClient
+
+///打招呼设置 文字
+class GreetingWordsWidget: BaseWidget {
+    
+    lazy var helloRecordView : HelloRecordingView = {
+        var view = HelloRecordingView()
+        view.addHelloRecordingView .addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(onClickAddHelloRecordingView(_:))))
+        view.addHelloRecordingView.titleLabel.text = "创建一段完美的打招呼语语吧"
+        return view
+    }()
+    
+    lazy var helloRecordingCellWidget: GreetingWordsCellWidget = {
+        let widget = GreetingWordsCellWidget()
+        return widget
+    }()
+    
+    var addHelloWordsAlertView = AddHelloWordsAlertView(frame: UIScreen.main.bounds)
+    
+    @objc func onClickAddHelloRecordingView(_ sender: UITapGestureRecognizer) {
+        UIViewController.fc.showingViewController?.view .addSubview(addHelloWordsAlertView)
+    }
+    
+    override func loadView() {
+        view = helloRecordView
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        helloRecordView.helloContainerView .addSubview(helloRecordingCellWidget.view)
+        helloRecordingCellWidget.view.fc.edge(equalTo: helloRecordView.helloContainerView)
+        
+        addHelloWordsAlertView.cancelButton .addTarget(self, action: #selector(onClickCancelButton(_:)), for: .touchUpInside)
+        addHelloWordsAlertView.okButton .addTarget(self, action: #selector(onClickOklButton(_:)), for: .touchUpInside)
+        
+        addHelloWordsAlertView.textView.placeholder.text = "请输入你的打招呼语"
+        addHelloWordsAlertView.textView.maxLength = 100
+        
+        
+    }
+    
+    @objc func onClickCancelButton(_ sender: UIButton) {
+        addHelloWordsAlertView .removeFromSuperview()
+
+    }
+    
+    @objc func onClickOklButton(_ sender: UIButton) {
+        
+        let text = addHelloWordsAlertView.textView.textView.text
+        
+        guard let sayhiText = text?.trim() else { return }
+        if sayhiText.isEmpty {
+            ToastView .show("打招呼语不可为空~")
+            return
+        }
+        
+        let req = SubmitGreetReq(type: .Greet_TEXT, data: sayhiText)
+        
+        UserManager.shared .submitGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.helloRecordingCellWidget.getGreetWords()
+        }
+        
+        addHelloWordsAlertView.textView.textView.text = nil
+        addHelloWordsAlertView .removeFromSuperview()
+        
+        NotificationCenter.default.post(name: UserManager.userSayhiUpdate, object: self)
+
+    }
+}
+
+import ACClient
+import ACCommonUI
+import FalconFoundation
+import FalconUIKit
+import Foundation
+import PassportUI
+import Reusable
+import UIKit
+
+///打招呼设置 语音 列表
+class HelloRecordingCellWidget:GenericOneSectionOneCellCollectionViewWidget<GreetInfo, HelloRecordingViewCell> {
+    init() {
+        super.init(elements: [], controller: nil, collectionView: BaseCollectionView(scrollDirection: .vertical))
+    }
+
+    /// 语音播放器
+    lazy var audioPlayer = OnlineAudioPlayer<GreetInfo>(downloader: .init(resourceHome: PathUtils.share))
+
+    let disposePackage = DisposePackage()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        collectionView.register(cellType: HelloRecordingViewCell.self)
+        getGreetGreetings()
+    }
+
+    public func getGreetGreetings() {
+        let req = CheckGreetReq(type: .Greet_VOICE)
+
+        UserManager.shared.checkGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.elements = response.value?.data?.infos ?? []
+        }
+    }
+
+    override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return .init(width: (collectionView.frame.width - 16) / 2, height: 80)
+    }
+
+    override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath, for element: GreetInfo) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(for: indexPath, cellType: HelloRecordingViewCell.self)
+        cell.cellView.greetInfo = element
+        cell.cellView.nameLabel.text = element.name
+        cell.cellView.durationLabel.text = String(element.duration ?? 0) + "s"
+        cell.cellView.delButton.fc.setUserInfo(object: element)
+        cell.cellView.delButton.addTarget(self, action: #selector(onClickDelButton(_:)), for: .touchUpInside)
+        cell.cellView.verfiyLabel.isHidden = element.state == .AuditPass
+        cell.cellView.playButton.fc.setUserInfo(object: element)
+        cell.cellView.playButton.addTarget(self, action: #selector(onClickPlayButton(_:)), for: .touchUpInside)
+        return cell
+    }
+
+    @objc func onClickDelButton(_ sender: UIButton) {
+        guard let element = sender.fc.getUserInfo(of: GreetInfo.self) else {
+            return
+        }
+
+        let req = DelGreetReq(type: .Greet_VOICE, id: element.id)
+
+        UserManager.shared.delGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.elements = response.value?.data?.infos ?? []
+            NotificationCenter.default.post(name: UserManager.userSayhiUpdate, object: self)
+        }
+    }
+
+    @objc func onClickPlayButton(_ sender: UIButton) {
+        guard let element = sender.fc.getUserInfo(of: GreetInfo.self) else {
+            return
+        }
+
+        sender.isSelected = !sender.isSelected
+        if audioPlayer.playerItem == element {
+            audioPlayer.playerItem = nil
+        } else {
+            audioPlayer.playerItem = element
+        }
+    }
+
+    override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
+        return 7
+    }
+
+    override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let element = element(at: indexPath)
+    }
+
+    override func onContentSizeChanged(_ oldValue: CGSize, newValue: CGSize) {
+        super.onContentSizeChanged(oldValue, newValue: newValue)
+        view.invalidateIntrinsicContentSize()
+    }
+}
+
+import ACCommonUI
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import SystemConfiguration
+import IMUI
+
+///打招呼设置 语音 
+class HelloRecordingWidget: BaseWidget {
+    
+    lazy var helloRecordView : HelloRecordingView = {
+        var view = HelloRecordingView()
+        view.addHelloRecordingView .addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(onClickAddHelloRecordingView(_:))))
+        view.addHelloRecordingView.titleLabel.text = "创建一段完美的打招呼语录音吧"
+        return view
+    }()
+    
+    lazy var helloRecordingCellWidget: HelloRecordingCellWidget = {
+        let widget = HelloRecordingCellWidget()
+        return widget
+    }()
+    
+    lazy var recordingPopUptWidget: RecordingPopUptWidget = {
+        let recordingPopUptWidget = RecordingPopUptWidget()
+        recordingPopUptWidget .setCallback {
+            self.helloRecordingCellWidget .getGreetGreetings()
+        }
+        return recordingPopUptWidget
+    }()
+    
+    @objc func onClickAddHelloRecordingView(_ sender: UITapGestureRecognizer) {
+        self.recordingPopUptWidget.show()
+    }
+    
+    override func loadView() {
+        view = helloRecordView
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        helloRecordView.helloContainerView .addSubview(helloRecordingCellWidget.view)
+        helloRecordingCellWidget.view.fc.edge(equalTo: helloRecordView.helloContainerView)
+        
+        
+    }
+}
+
+import ACCommonUI
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import GiftUI
+import OBSClient
+import ACClient
+import FalconFoundation
+import IMUI
+
+// 录音弹出面板
+class RecordingPopUptWidget: GenericPopupWidget<DefaultAudioRecordWidget> {
+    public init(uid: Int? = nil) {
+        super.init(contentWidget: .init())
+    }
+    
+    public typealias Callback = () -> Void
+    var callback: Callback?
+    
+    /// 设置回调
+    /// - Parameter callback: 回调
+    public func setCallback(_ callback: Callback? = nil) {
+        self.callback = callback
+    }
+    
+    lazy var saveAlertWidget : RecordingSavePopUpWidget = {
+        var saveAlertWidget = RecordingSavePopUpWidget()
+        saveAlertWidget.contentWidget.recordingAlertView.reRecordingButton.addTarget(self, action: #selector(onClickReRecordingButton(_:)), for: .touchUpInside)
+        saveAlertWidget.contentWidget.recordingAlertView.saveButton.addTarget(self, action: #selector(onClickSaveButton(_:)), for: .touchUpInside)
+        saveAlertWidget.contentWidget.recordingAlertView.playButton.addTarget(self, action: #selector(onClickPlayButton(_:)), for: .touchUpInside)
+        return saveAlertWidget
+    }()
+    
+    /// 语音播放器
+    lazy var audioPlayer = DefaultOnlineAudioPlayer(downloader: .init(resourceHome: PathUtils.share))
+    
+    @objc func onClickPlayButton(_ sender: UIButton) {
+        sender.isSelected = !sender.isSelected
+        if sender.isSelected {
+            audioPlayer.playerItem = .init(url: self.recordingURL)
+        }else{
+            audioPlayer.playerItem = nil
+        }
+       
+    }
+    
+    @objc func onClickReRecordingButton(_ sender: UIButton) {
+        self.show()
+        self.saveAlertWidget.dismiss()
+    }
+    
+    @objc func onClickSaveButton(_ sender: UIButton) {
+        
+        let text = saveAlertWidget.contentWidget.recordingAlertView.nameTextField.text
+        guard let sayhiText = text?.trim() else { return }
+        
+        if sayhiText.isEmpty {
+            ToastView .show("打招呼语名称不可为空~")
+            return
+        }
+        
+        //请求保存的接口 然后dismiss
+        let req = SubmitGreetReq(type: .Greet_VOICE,name:text, data: self.recordingURL, duration: self.duration)
+        
+        UserManager.shared .submitGreetRequest(req) { response in
+            if response.error != nil {
+                ToastView .showError(response.error)
+                return
+            }
+            self.callback?()
+            self.saveAlertWidget.contentWidget.recordingAlertView.nameTextField.text = nil
+            self.saveAlertWidget.dismiss()
+            NotificationCenter.default.post(name: UserManager.userSayhiUpdate, object: self)
+        }
+    }
+    
+    var recordingURL: String?
+    var duration: Int?
+    
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        containerView.backgroundColor = UIColor(named: .themeBlack) .withAlphaComponent(0.6)
+//        UIImage().fc.base64EncodedString()
+        contentWidget.setCallback { result in
+            
+            switch result {
+            case let .success((filePath, duration)):
+                OBSClient.shared.uploadAudio(filePath, audio: .init(duration: duration)) { result in
+                    print("[upload] \(result)")
+                    
+                    self.recordingURL = try? result.get()
+                    self.duration = duration
+                    self.saveAlertWidget.contentWidget.recordingAlertView.durationLabel.text = String(duration) + "s"
+                    self.dismiss()
+                    self.saveAlertWidget.contentWidget.recordingAlertView.nameTextField.text = nil
+                    self.saveAlertWidget.show()
+                }
+                
+            default:
+                break
+            }
+
+        }
+        
+        audioPlayer .setCallback{
+            self.saveAlertWidget.contentWidget.recordingAlertView.playButton.isSelected = false
+        }
+    }
+}
+
+lass RecordingSaveAlertWidget: BaseWidget {
+    
+    public var recordingAlertView = RecordingAlertSaveView()
+    
+    var nameTextFieldLimit = TextFileldLegthLimiter()
+    
+    override func loadView() {
+        view = recordingAlertView
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        recordingAlertView.heightAnchor.constraint(equalToConstant: 346).isActive = true
+        recordingAlertView.nameTextField.delegate = self
+        nameTextFieldLimit.maxLength = 5
+        nameTextFieldLimit.useCharLength = true
+        
+        nameTextFieldLimit.textField = recordingAlertView.nameTextField
+    }
+}
+
+// 录音保存弹出面板
+class RecordingSavePopUpWidget: GenericPopupWidget<RecordingSaveAlertWidget> {
+    public init(uid: Int? = nil) {
+        super.init(contentWidget: .init())
+    }
+    
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        containerView.topButton.backgroundColor = UIColor(named: .themeBlack) .withAlphaComponent(0.6)
+        setupNotifications()
+    }
+    
+    let disposePackage = DisposePackage()
+    
+    func setupNotifications() {
+        // 处理键盘弹出
+        NotificationCenter.default.fc.addKeybouardWillShow(animated: true) { [weak self] _, _, frame in
+            guard let self = self else { return }
+            
+            self.view.transform = .init(translationX: 0, y: -frame.height)
+        }.dispose(by: disposePackage)
+
+        // 处理键盘收起
+        NotificationCenter.default.fc.addKeyboardWillHide(animated: true) { [weak self] _, _, _ in
+            guard let self = self else { return }
+
+            self.view.transform = .identity
+        }.dispose(by: disposePackage)
+    }
+}
+
+extension RecordingSaveAlertWidget: UITextFieldDelegate {
+    @objc func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+        return true
+    }
+
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        return true
+    }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        self.recordingAlertView .endEditing(true)
+        return true
+    }
+}
+
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import PassportUI
+import ACCommonUI
+import FalconFoundation
+import ACClient
+
+open class SayHiVoiceSelectCellWidget:GenericOneSectionOneCellCollectionViewWidget<GreetInfo, SayHiWordsSelectItemCell> {
+    init() {
+        super.init(elements: [], controller: nil, collectionView: BaseCollectionView(scrollDirection: .vertical))
+    }
+    
+    var defaultDate :[GreetInfo]{
+       [
+         GreetInfo(name: "随机发送一条语音", data: "", id: 0, duration: 0, state: .AuditPass),
+        ]
+    }
+    
+    var greetVoice = GreetInfo()
+    
+    // 返回的打招呼录音数据
+    var submitGreetResp: SubmitGreetResp?{
+        didSet{
+            self.elements = self.defaultDate + (submitGreetResp?.infos ?? [])
+        }
+    }
+    
+    public typealias Callback = () -> Void
+    
+    public var callback: Callback?
+    
+    public func setCallback(_ callback: Callback? = nil) {
+        self.callback = callback
+    }
+    
+    /// 语音播放器
+    lazy var audioPlayer = OnlineAudioPlayer<GreetInfo>(downloader: .init(resourceHome: PathUtils.share))
+    
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        collectionView.register(cellType: SayHiWordsSelectItemCell.self)
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        
+        return .init(width: collectionView.frame.width, height: 37)
+    }
+    open override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath, for element: GreetInfo) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(for: indexPath, cellType: SayHiWordsSelectItemCell.self)
+        if element.id == 0 {
+            cell.cellView.playButton .setImage(Asset.SayHello.sayhiRecordingRandom.image, for: .normal)
+            cell.cellView.playButton .setImage(Asset.SayHello.sayhiRecordingRandom.image, for: .selected)
+        }else{
+            cell.cellView.playButton .setImage(Asset.SayHello.sayhiRecordingPlay.image, for: .normal)
+            cell.cellView.playButton .setImage(Asset.SayHello.sayhiRecordingPause.image, for: .selected)
+        }
+        cell.cellView.greeInfo = element
+        cell.cellView.titleLabel.text = element.name
+        cell.cellView.playButton.fc.setUserInfo(object: element)
+        cell.cellView.examineLabel.isHidden = element.state == .AuditPass
+        cell.cellView.playButton .addTarget(self, action: #selector(onClickPlayButton(_:)), for: .touchUpInside)
+        return cell
+    }
+    
+    @objc func onClickPlayButton(_ sender: UIButton) {
+        guard let element = sender.fc.getUserInfo(of: GreetInfo.self) else {
+            return
+        }
+        
+        sender.isSelected = !sender.isSelected
+        if audioPlayer.playerItem == element{
+            audioPlayer.playerItem = nil
+        } else {
+            audioPlayer.playerItem = element
+        }
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
+        return 1
+    }
+
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
+        return 1
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, shouldDeselectItemAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let element = element(at: indexPath)
+        if element.state == .AuditPass{
+        }else{
+            ToastView .show("需要审核通过才可发送~")
+            return
+        }
+        self.greetVoice = element
+        
+        callback?()
+        super.collectionView(collectionView, didSelectItemAt: indexPath)
+    }
+    
+    open override func onContentSizeChanged(_ oldValue: CGSize, newValue: CGSize) {
+        super.onContentSizeChanged(oldValue, newValue: newValue)
+        self.view.invalidateIntrinsicContentSize()
+    }
+}
+
+import FalconUIKit
+import Foundation
+import Reusable
+import UIKit
+import PassportUI
+import ACCommonUI
+import FalconFoundation
+import ACClient
+
+open class SayHiWordsSelectCellWidget:GenericOneSectionOneCellCollectionViewWidget<GreetInfo, SayHiWordsSelectItemCell> {
+    init() {
+        super.init(elements: [], controller: nil, collectionView: BaseCollectionView(scrollDirection: .vertical))
+    }
+    
+    var defaultDate :[GreetInfo]{
+       [
+         GreetInfo(name: "", data: "不发送文字", id: 0, duration: 0, state: .AuditPass),
+         GreetInfo(name: "", data: "随机发送一条文案", id: 0, duration: 1, state: .AuditPass),
+        ]
+    }
+    
+    // 返回的打招呼文案数据
+    var submitGreetResp: SubmitGreetResp?{
+        didSet{
+            self.elements = self.defaultDate + (submitGreetResp?.infos ?? [])
+        }
+    }
+    
+    var greetWords = GreetInfo()
+    
+    public typealias Callback = () -> Void
+    
+    public var callback: Callback?
+    
+    public func setCallback(_ callback: Callback? = nil) {
+        self.callback = callback
+    }
+    
+    open override func viewDidLoad() {
+        super.viewDidLoad()
+        collectionView.register(cellType: SayHiWordsSelectItemCell.self)
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return .init(width: collectionView.frame.width, height: 37)
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath, for element: GreetInfo) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(for: indexPath, cellType: SayHiWordsSelectItemCell.self)
+        if element.data == "不发送文字" {
+            cell.cellView.playButton .setImage(Asset.SayHello.sayhiEmpty.image, for: .normal)
+            cell.cellView.updateUIhasPlayButton()
+        }else if element.data == "随机发送一条文案" {
+            cell.cellView.playButton .setImage(Asset.SayHello.sayhiRecordingRandom.image, for: .normal)
+            cell.cellView.updateUIhasPlayButton()
+        }else{
+            cell.cellView.updateUIWithNoPlayButton()
+        }
+        cell.cellView.titleLabel.text = element.data
+        cell.cellView.examineLabel.isHidden = element.state == .AuditPass
+        return cell
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
+        return 1
+    }
+
+    open override func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
+        return 1
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, shouldDeselectItemAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+    
+    open override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let element = element(at: indexPath)
+        if element.state == .AuditPass{
+        }else{
+            ToastView .show("需要审核通过才可发送~")
+            return
+        }
+        self.greetWords = element
+        callback?()
+        super.collectionView(collectionView, didSelectItemAt: indexPath)
+    }
+    
+    open override func onContentSizeChanged(_ oldValue: CGSize, newValue: CGSize) {
+        super.onContentSizeChanged(oldValue, newValue: newValue)
+        self.view.invalidateIntrinsicContentSize()
+    }
+}
