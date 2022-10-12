@@ -1304,3 +1304,197 @@ open class SayHiWordsSelectCellWidget:GenericOneSectionOneCellCollectionViewWidg
         self.view.invalidateIntrinsicContentSize()
     }
 }
+
+import Foundation
+import FalconUIKit
+import UIKit
+import ACCommonUI
+import FalconFoundation
+
+
+class DefaultAudioRecordWidget: BaseWidget {
+    
+    lazy var recordView: RecordingAlertView = {
+        let recordView = RecordingAlertView()
+        recordView.progressView.indicatorProgress = CGFloat(minDuration) / CGFloat(maxDuration)
+        recordView.recodButton.addTarget(self, action: #selector(onClickRecordButton(_:)), for: .touchUpInside)
+        return recordView
+    }()
+    
+    /// 回调，第一个参数是文件路径，第二个参数是录音的长度
+    typealias Callback = (Result<(String, Int), NSError>) -> Void
+
+    var callback: Callback?
+
+    /// 设置回调，第一个参数是文件路径，第二个参数是录音的长度
+    /// - Parameter callback: (String, TimeInterval) -> Void
+    func setCallback(_ callback: Callback? = nil) {
+        self.callback = callback
+    }
+
+    /// 最短的录音时间，默认6s
+    let minDuration: Int
+
+    /// 最大的录音时间，默认60s
+    let maxDuration: Int
+    
+    /// 计时器，用来记录录音的时间
+    var timer: Timer?
+    
+    /// 录音的时长
+    var duration: Int = 0 {
+        didSet {
+            // 1.更新时间的展示
+            recordView.recodingLabel.text = "\(Int(duration))s"
+            
+            //TODO: 录音时长更新
+            recordView.progressView.progress = CGFloat(duration) / CGFloat(maxDuration)
+            
+            // 2.判断最大时长，如果超了，要停止
+            if duration >= maxDuration {
+                invokeStopAction()
+                return
+            }
+
+//            // 3.倒计时显示
+//            if duration == toastDuration {
+//                ToastView.show("\(maxDuration - toastDuration)秒后结束录音")
+//                return
+//            }
+        }
+    }
+    
+    /// 录制成功才有这个时长，录音的时长
+    var finalDuration: Int?
+
+
+    /// 每次都是重新生成的文件目录，如果外面没传
+    var filePath: String {
+        // 如果没有传目录，则使用临时目录就行
+        let home = resourceHome ?? PathUtils.userTemp("nobody")
+
+        return URL(fileURLWithPath: home)
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("m4a")
+            .path
+    }
+
+    /// 存放音频资源的目录
+    var resourceHome: String?
+    
+    let disposePackage = DisposePackage()
+    
+    init(minDuration: Int = 6,
+         maxDuration: Int = 60
+         ) {
+        self.minDuration = minDuration
+        self.maxDuration = maxDuration
+        
+        super.init(viewController: nil)
+    }
+    
+    override func loadView() {
+        view = recordView
+    }
+    
+    
+    @objc func onClickRecordButton(_ sender: UIButton) {
+        /// 最小化通话中，不能开启录音
+        if AlertBuilder.showVideoDisableToast() {
+            return
+        }
+        
+        AlertBuilder.showAudioSettingAlertIfNeed {[weak self] in
+            if self?.audioRecorder != nil {
+                self?.invokeStopAction()
+            }else {
+                self?.invokeStartAction()
+            }
+        }
+    }
+
+    func invokeStartAction() {
+        //显示进度条
+        recordView.recordingView.isHidden = false
+        recordView.normalImageView.isHidden = true
+
+        //时长，设置为0
+        duration = 0
+        
+        // 2.计时
+        startTimer()
+
+        // 3.开始录制
+        startRecord()
+
+    }
+    
+    func invokeStopAction() {
+        guard audioRecorder != nil else {
+            return
+        }
+        // 1.停掉Timer
+        stopTimer()
+
+        // 2.如果录制的时间少于最短时长限制，则取消掉
+        if duration < minDuration {
+            // 取消录制
+            cancelRecord()
+            ToastView.show("保存失败，录制小于\(minDuration)s")
+        } else {
+            // 完成录制
+            stopRecord()
+
+        }
+        
+        //收起进度条
+        recordView.recordingView.isHidden = true
+        recordView.normalImageView.isHidden = false
+        recordView.recodingLabel.text = "点击开始录音"
+        recordView.progressView.progress = 0
+        
+    }
+    
+    // MARK: 音频录制相关
+
+    var audioRecorder: AudioRecorder?
+
+    func startRecord() {
+        // 创建Recorder
+        audioRecorder = AudioRecorder(filePath: filePath, callback: { [weak self] result in
+            guard let self = self, let duration = self.finalDuration else { return }
+            self.audioRecorder = nil
+            let newResult = result.flatMap { str in
+                .success((str, duration))
+            }
+            self.callback?(newResult)
+        })
+        audioRecorder?.start()
+    }
+
+    func stopRecord() {
+        finalDuration = duration
+        audioRecorder?.stop()
+    }
+    
+    func cancelRecord() {
+        finalDuration = nil
+        audioRecorder?.cancel()
+        audioRecorder = nil
+    }
+    
+    func startTimer() {
+        timer = .fc.scheduledTimer(withTimeInterval: 1, repeats: true, block: { [weak self] _ in
+            guard let self = self else { return }
+
+            // 计时+1
+            self.duration += 1
+
+        }).fc.dispose(by: disposePackage)
+
+    }
+    
+    func stopTimer() {
+        disposePackage.dispose()
+    }
+}
